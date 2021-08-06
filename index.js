@@ -26,7 +26,7 @@ let currently_compounding = false
 async function checkCompoundingOpportunities(){
     if(currently_compounding) return
     try{
-        const pendingDino = await dinoFarmContract.methods.pendingDino(10, wallet.address).call()
+        const pendingDino = await dinoFarmContract.methods.pendingDino(farmID, wallet.address).call()
         const gasLimit = 100000
         const gasPrice = await web3.eth.getGasPrice()
         const txCost = web3.utils.fromWei(gasPrice.toString(),'ether') * gasLimit
