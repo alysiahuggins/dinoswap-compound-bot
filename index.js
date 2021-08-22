@@ -21,28 +21,49 @@ const SFI_POOL_CONTRACT="0x990Fd37852b6123B376bCe814BC08192148ef9Aa"
 const dinoFarmContract = new web3.eth.Contract(DINO_FARM_ABI, DINO_FARM_CONTRACT)
 const dinoPoolContract = new web3.eth.Contract(DINO_POOL_ABI, DINO_POOL_CONTRACT)
 const sfiPoolContract = new web3.eth.Contract(SFI_POOL_ABI, SFI_POOL_CONTRACT)
+const ustPoolContract = new web3.eth.Contract(SFI_POOL_ABI, UST_POOL_CONTRACT)
 
-const farmID = 10
+
+const farmIds = process.env.FARM_IDS.split(",").map( (x) => Number(x))
 
 let currently_compounding = false
 
 async function checkCompoundingOpportunities(){
     if(currently_compounding) return
     try{
-        const pendingDino = await dinoFarmContract.methods.pendingDino(farmID, wallet.address).call()
+
         const gasLimit = 200000
-        const gasPrice = await web3.eth.getGasPrice()
+        //const gasPrice = await web3.eth.getGasPrice()
+        const gasPrice = 1100000000 //1.1 gwei
         const txCost = web3.utils.fromWei(gasPrice.toString(),'ether') * gasLimit
-        
+
+
+        console.log(farmIds)
+        allPendingDino = farmIds.map ( (id) => {
+        	return  dinoFarmContract.methods.pendingDino(id, wallet.address).call()
+        })
+
+
+        allPendingDino = await Promise.all(allPendingDino)
+
+        console.log(allPendingDino)
+
+        sumPendingDino = allPendingDino.reduce(function (a, b) {
+		  return Number(a) + Number(b)
+		}, 0);
+
+        console.log(`sumPendingDino ${sumPendingDino} Human readable: ${web3.utils.fromWei(sumPendingDino.toString(),'ether')}`)
+        pendingDinoAmount = web3.utils.fromWei(sumPendingDino.toString(),'ether')
+
         //if the dino to be excavated is more than the transaction cost (assumes 1 DINO>1 MATIC)
-        if(pendingDino > 4 * txCost) {
-            console.log(`time to compound ${web3.utils.fromWei(pendingDino.toString(),'ether')} DINO!`)
+        if(pendingDinoAmount > .5) {
+            console.log(`time to compound ${pendingDinoAmount} DINO!`)
             currently_compounding = true
             console.log(`gas Price: ${gasPrice}`)
-            compound(pendingDino, dinoPoolContract, gasPrice, gasLimit)
+            compound(sumPendingDino.toString(), ustPoolContract, gasPrice, gasLimit)
         }
         else{
-            console.log(`not ready to compound ${web3.utils.fromWei(pendingDino.toString(),'ether')} DINO`)
+            console.log(`not ready to compound ${pendingDinoAmount} DINO`)
         }
     } catch (err){
         console.log(`didn't fetch pendingDino ${err}`)
@@ -54,23 +75,33 @@ async function compound(pendingDino, poolContract, gasPrice, gasLimit){
     console.log('begin compounding')
 
     //Withdraw DINO from Farm
-    try{
-        const withdrawTx = await dinoFarmContract.methods.deposit(farmID,0).send(
-            {
-            from: wallet.address,
-            gas: gasLimit,
-            gasPrice: gasPrice
-            }
-        )
-        console.log(`withdraw status: ${withdrawTx.status}`)
-    } catch (err){
-        currently_compounding = false
-        console.log(`Withdraw DINO error ${err.message}`)
-        return
-    }
+
+    farmWithDraw = farmIds.map ( async (farmId) => {
+    	try {
+	        withdrawTx = await dinoFarmContract.methods.deposit(farmId,0).send(
+		            {
+		            	from: wallet.address,
+		            	gas: gasLimit,
+		            	gasPrice: gasPrice
+		            }
+		        )
+
+	        return withdrawTx
+        } catch (err){
+        	currently_compounding = false
+        	console.log(`Deposit DINO withdrawn error ${err}`)
+        	return Promise.resolve('Errror')
+    	}
+    })
+
+
+    farmWithDraw = await Promise.all(farmWithDraw)
+ 	
+ 	console.log("done with withdrawls")
+ 	console.log(farmWithDraw)
 
     try{
-    //Deposit DINO into Pool
+    	//Deposit DINO into Pool
         const depositTx = await poolContract.methods.deposit(pendingDino).send(
             {
             from: wallet.address,
@@ -81,7 +112,7 @@ async function compound(pendingDino, poolContract, gasPrice, gasLimit){
         console.log(`deposit status: ${depositTx.status}`)
     } catch (err){
         currently_compounding = false
-        console.log(`Deposit DINO error ${err.message}`)
+        console.log(`Deposit DINO into pool error ${err.message}`)
         return
     }
     
